@@ -46,6 +46,9 @@ Electron + React + TypeScript app for loading a DBC + TRC and plotting decoded s
 - **Phase 3** — replaced candied decode with custom J1939-aware decoder; per-SA signal series; multi-trace picker; message grouping
 - **Phase 4** (current) — stacked panes with synced x-axis, dual Y, collapsible nav + progress modal, chunked parse/decode
 
+## Outstanding TODOs
+- User will regenerate their current DBC to include long-form message names (e.g. `ElectronicTransmissionController1` instead of `ETC1`). Candied exposes `Message.name` as the literal `BO_` symbol and does not derive long names. When the new DBC lands, update `src/main/dbc.ts` (and `decode.ts` where `messageName` is set) to prefer `msg.description` or a long-symbol attribute (e.g. `SystemMessageLongSymbol`) with fallback to `msg.name`.
+
 ## Non-goals (deliberately deferred)
 - Worker threads (Phase 5)
 - Decimation / LTTB

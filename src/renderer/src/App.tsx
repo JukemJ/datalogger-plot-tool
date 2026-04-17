@@ -88,7 +88,9 @@ function App(): React.JSX.Element {
       setDbc({ path: filePath, summary: result.summary, decodable: result.decodable })
       setSignals([])
       setTrc(null)
-      setPanes([{ id: nextPaneId(), title: 'Plot 1', traces: [] }])
+      const fresh = { id: nextPaneId(), title: 'Plot 1', traces: [] }
+      setPanes([fresh])
+      setActivePaneId(fresh.id)
       payloadCache.clear()
     } else {
       setDbcError(result.error)
