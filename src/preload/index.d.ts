@@ -9,7 +9,7 @@ export type DbcLoadResult =
   | { ok: true; summary: DbcSummary; catalog: DbcCatalog; decodable: boolean }
   | { ok: false; error: string }
 
-export type TrcSignalSummary = {
+export type TraceSignalSummary = {
   key: string
   signalName: string
   messageName: string
@@ -17,8 +17,14 @@ export type TrcSignalSummary = {
   unit: string
   count: number
 }
-export type TrcLoadResult =
-  | { ok: true; frameCount: number; skipped: number; signals: TrcSignalSummary[] }
+export type TraceLoadResult =
+  | {
+      ok: true
+      frameCount: number
+      skipped: number
+      signals: TraceSignalSummary[]
+      warnings: string[]
+    }
   | { ok: false; error: string }
 
 export type SignalPayload = {
@@ -32,16 +38,16 @@ export type SignalPayload = {
 }
 
 export type ProgressStage = 'reading' | 'parsing' | 'decoding' | 'indexing'
-export type TrcProgress = { stage: ProgressStage; current: number; total: number }
+export type TraceProgress = { stage: ProgressStage; current: number; total: number }
 
 export interface Api {
   loadDbc: (filePath: string) => Promise<DbcLoadResult>
   pickDbc: () => Promise<string | null>
-  loadTrc: (filePath: string) => Promise<TrcLoadResult>
-  pickTrc: () => Promise<string | null>
+  loadTrace: (filePath: string) => Promise<TraceLoadResult>
+  pickTrace: () => Promise<string | null>
   getSignal: (key: string) => Promise<SignalPayload | null>
   getPathForFile: (file: File) => string
-  onTrcProgress: (cb: (p: TrcProgress) => void) => () => void
+  onTraceProgress: (cb: (p: TraceProgress) => void) => () => void
 }
 
 declare global {

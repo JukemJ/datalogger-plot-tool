@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Plotly from 'plotly.js-dist-min'
 
 type DbcSummary = { version: string; messageCount: number; signalCount: number }
-type TrcSignalSummary = {
+type TraceSignalSummary = {
   key: string
   signalName: string
   messageName: string
@@ -20,10 +20,15 @@ type SignalPayload = {
   values: Float64Array
 }
 type ProgressStage = 'reading' | 'parsing' | 'decoding' | 'indexing'
-type TrcProgress = { stage: ProgressStage; current: number; total: number }
+type TraceProgress = { stage: ProgressStage; current: number; total: number }
 
 type DbcLoaded = { path: string; summary: DbcSummary; decodable: boolean }
-type TrcLoaded = { path: string; frameCount: number; skipped: number }
+type TraceLoaded = {
+  path: string
+  frameCount: number
+  skipped: number
+  warnings: string[]
+}
 
 type PaneTrace = { key: string; axis: 'left' | 'right' }
 type Pane = { id: string; title: string; traces: PaneTrace[] }
@@ -57,15 +62,15 @@ function nextPaneId(): string {
 
 function App(): React.JSX.Element {
   const [dbc, setDbc] = useState<DbcLoaded | null>(null)
-  const [trc, setTrc] = useState<TrcLoaded | null>(null)
+  const [trace, setTrace] = useState<TraceLoaded | null>(null)
   const [dbcError, setDbcError] = useState<string | null>(null)
-  const [trcError, setTrcError] = useState<string | null>(null)
-  const [signals, setSignals] = useState<TrcSignalSummary[]>([])
+  const [traceError, setTraceError] = useState<string | null>(null)
+  const [signals, setSignals] = useState<TraceSignalSummary[]>([])
   const [filter, setFilter] = useState('')
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
-  const [progress, setProgress] = useState<TrcProgress | null>(null)
+  const [progress, setProgress] = useState<TraceProgress | null>(null)
   const [showDbcPicker, setShowDbcPicker] = useState(false)
-  const [showTrcPicker, setShowTrcPicker] = useState(false)
+  const [showTracePicker, setShowTracePicker] = useState(false)
 
   const [panes, setPanes] = useState<Pane[]>(() => [
     { id: nextPaneId(), title: 'Plot 1', traces: [] }
@@ -76,7 +81,7 @@ function App(): React.JSX.Element {
   const xRangeSource = useRef<string | null>(null)
 
   useEffect(() => {
-    const unsub = window.api.onTrcProgress((p) => setProgress(p))
+    const unsub = window.api.onTraceProgress((p) => setProgress(p))
     return unsub
   }, [])
 
@@ -87,7 +92,7 @@ function App(): React.JSX.Element {
     if (result.ok) {
       setDbc({ path: filePath, summary: result.summary, decodable: result.decodable })
       setSignals([])
-      setTrc(null)
+      setTrace(null)
       const fresh = { id: nextPaneId(), title: 'Plot 1', traces: [] }
       setPanes([fresh])
       setActivePaneId(fresh.id)
@@ -97,19 +102,24 @@ function App(): React.JSX.Element {
     }
   }, [])
 
-  const loadTrcPath = useCallback(async (filePath: string) => {
-    setTrcError(null)
-    setShowTrcPicker(false)
+  const loadTracePath = useCallback(async (filePath: string) => {
+    setTraceError(null)
+    setShowTracePicker(false)
     setProgress({ stage: 'reading', current: 0, total: 1 })
-    const result = await window.api.loadTrc(filePath)
+    const result = await window.api.loadTrace(filePath)
     setProgress(null)
     if (result.ok) {
-      setTrc({ path: filePath, frameCount: result.frameCount, skipped: result.skipped })
+      setTrace({
+        path: filePath,
+        frameCount: result.frameCount,
+        skipped: result.skipped,
+        warnings: result.warnings
+      })
       setSignals(result.signals)
       payloadCache.clear()
       setPanes((prev) => prev.map((p) => ({ ...p, traces: [] })))
     } else {
-      setTrcError(result.error)
+      setTraceError(result.error)
     }
   }, [])
 
@@ -122,7 +132,7 @@ function App(): React.JSX.Element {
   }, [signals, filter])
 
   const grouped = useMemo(() => {
-    const map = new Map<string, TrcSignalSummary[]>()
+    const map = new Map<string, TraceSignalSummary[]>()
     for (const s of filtered) {
       const arr = map.get(s.messageName)
       if (arr) arr.push(s)
@@ -234,25 +244,25 @@ function App(): React.JSX.Element {
     setXRange(range)
   }, [])
 
-  const fullyLoaded = dbc !== null && trc !== null
-
   const pickDbc = async (): Promise<void> => {
     const p = await window.api.pickDbc()
     if (p) loadDbcPath(p)
   }
-  const pickTrc = async (): Promise<void> => {
-    const p = await window.api.pickTrc()
-    if (p) loadTrcPath(p)
+  const pickTrace = async (): Promise<void> => {
+    const p = await window.api.pickTrace()
+    if (p) loadTracePath(p)
   }
+
+  const fullyLoaded = dbc !== null && trace !== null
 
   return (
     <div className={`app${fullyLoaded ? ' app--loaded' : ''}`}>
       {fullyLoaded ? (
         <NavBar
           dbcName={basename(dbc!.path)}
-          trcName={basename(trc!.path)}
+          traceName={basename(trace!.path)}
           onChangeDbc={() => setShowDbcPicker(true)}
-          onChangeTrc={() => setShowTrcPicker(true)}
+          onChangeTrace={() => setShowTracePicker(true)}
         />
       ) : (
         <header className="header">
@@ -269,14 +279,20 @@ function App(): React.JSX.Element {
               onBrowse={pickDbc}
             />
             <FileZone
-              label={trc ? `TRC loaded: ${basename(trc.path)}` : 'Drop a TRC file (.trc v2.1)'}
-              onFile={loadTrcPath}
-              onBrowse={pickTrc}
+              label={
+                trace
+                  ? `Trace loaded: ${basename(trace.path)}`
+                  : 'Drop a trace file (.trc v2.1 or .mf4)'
+              }
+              onFile={loadTracePath}
+              onBrowse={pickTrace}
             />
           </div>
           {dbcError && <section className="status status--err">DBC error: {dbcError}</section>}
-          {trcError && <section className="status status--err">TRC error: {trcError}</section>}
-          {dbc && !trc && (
+          {traceError && (
+            <section className="status status--err">Trace error: {traceError}</section>
+          )}
+          {dbc && !trace && (
             <section className="status status--ok">
               <div className="status__path">{dbc.path}</div>
               <dl className="summary">
@@ -397,14 +413,16 @@ function App(): React.JSX.Element {
         </Modal>
       )}
 
-      {showTrcPicker && fullyLoaded && (
-        <Modal onClose={() => setShowTrcPicker(false)} title="Change Trace">
+      {showTracePicker && fullyLoaded && (
+        <Modal onClose={() => setShowTracePicker(false)} title="Change Trace">
           <FileZone
-            label="Drop a TRC file (.trc v2.1)"
-            onFile={loadTrcPath}
-            onBrowse={pickTrc}
+            label="Drop a trace file (.trc v2.1 or .mf4)"
+            onFile={loadTracePath}
+            onBrowse={pickTrace}
           />
-          {trcError && <section className="status status--err">TRC error: {trcError}</section>}
+          {traceError && (
+            <section className="status status--err">Trace error: {traceError}</section>
+          )}
         </Modal>
       )}
 
@@ -415,14 +433,14 @@ function App(): React.JSX.Element {
 
 function NavBar({
   dbcName,
-  trcName,
+  traceName,
   onChangeDbc,
-  onChangeTrc
+  onChangeTrace
 }: {
   dbcName: string
-  trcName: string
+  traceName: string
   onChangeDbc: () => void
-  onChangeTrc: () => void
+  onChangeTrace: () => void
 }): React.JSX.Element {
   return (
     <nav className="navbar">
@@ -438,10 +456,10 @@ function NavBar({
       </span>
       <span className="navbar__item">
         <span className="navbar__label">Trace:</span>
-        <span className="navbar__file" title={trcName}>
-          {trcName}
+        <span className="navbar__file" title={traceName}>
+          {traceName}
         </span>
-        <button type="button" onClick={onChangeTrc}>
+        <button type="button" onClick={onChangeTrace}>
           Change
         </button>
       </span>
@@ -473,7 +491,7 @@ function Modal({
   )
 }
 
-function ProgressOverlay({ progress }: { progress: TrcProgress }): React.JSX.Element {
+function ProgressOverlay({ progress }: { progress: TraceProgress }): React.JSX.Element {
   const pct = progress.total > 0 ? Math.floor((progress.current / progress.total) * 100) : 0
   return (
     <div className="progress-backdrop">
@@ -606,12 +624,10 @@ function PaneView({
       .map((t) => {
         const p = payloads.get(t.key)
         if (!p) return null
-        const xSec = new Float64Array(p.timestamps.length)
-        for (let i = 0; i < xSec.length; i++) xSec[i] = p.timestamps[i] / 1000
         return {
           type: 'scatter' as const,
           mode: 'lines' as const,
-          x: Array.from(xSec),
+          x: Array.from(p.timestamps),
           y: Array.from(p.values),
           name: traceLabel(p),
           yaxis: t.axis === 'right' ? 'y2' : 'y'

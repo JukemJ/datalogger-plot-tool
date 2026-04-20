@@ -61,7 +61,8 @@ export async function parseTrc(filePath: string, onProgress?: ProgressCb): Promi
         if (tokens.length < minTokens) {
           skipped++
         } else if (tokens[col.type] === 'DT') {
-          const timestamp = parseFloat(tokens[col.time])
+          const timestampMs = parseFloat(tokens[col.time])
+          const timestamp = timestampMs / 1000
           const id = parseInt(tokens[col.id], 16)
           const dlc = parseInt(tokens[col.length], 10)
           if (!Number.isFinite(timestamp) || !Number.isFinite(id) || !Number.isFinite(dlc)) {

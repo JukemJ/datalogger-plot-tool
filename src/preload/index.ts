@@ -4,11 +4,11 @@ import { electronAPI } from '@electron-toolkit/preload'
 const api = {
   loadDbc: (filePath: string) => ipcRenderer.invoke('dbc:load', filePath),
   pickDbc: () => ipcRenderer.invoke('dbc:pick'),
-  loadTrc: (filePath: string) => ipcRenderer.invoke('trc:load', filePath),
-  pickTrc: () => ipcRenderer.invoke('trc:pick'),
-  getSignal: (key: string) => ipcRenderer.invoke('trc:getSignal', key),
+  loadTrace: (filePath: string) => ipcRenderer.invoke('trace:load', filePath),
+  pickTrace: () => ipcRenderer.invoke('trace:pick'),
+  getSignal: (key: string) => ipcRenderer.invoke('trace:getSignal', key),
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
-  onTrcProgress: (
+  onTraceProgress: (
     cb: (p: {
       stage: 'reading' | 'parsing' | 'decoding' | 'indexing'
       current: number
@@ -16,8 +16,8 @@ const api = {
     }) => void
   ) => {
     const handler = (_e: Electron.IpcRendererEvent, p: Parameters<typeof cb>[0]): void => cb(p)
-    ipcRenderer.on('trc:progress', handler)
-    return () => ipcRenderer.removeListener('trc:progress', handler)
+    ipcRenderer.on('trace:progress', handler)
+    return () => ipcRenderer.removeListener('trace:progress', handler)
   }
 }
 
