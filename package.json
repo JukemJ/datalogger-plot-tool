@@ -14,7 +14,7 @@
     "start": "electron-vite preview",
     "dev": "electron-vite dev",
     "build": "npm run typecheck && electron-vite build",
-    "test": "node --experimental-strip-types --no-warnings src/main/decode.test.ts",
+    "test": "node --experimental-strip-types --no-warnings src/main/decode.test.ts && node --experimental-strip-types --no-warnings src/main/mf4.test.ts",
     "postinstall": "electron-builder install-app-deps",
     "build:unpack": "npm run build && electron-builder --dir",
     "build:win": "npm run build && electron-builder --win",
