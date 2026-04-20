@@ -1,5 +1,5 @@
 import type { Message, Signal } from 'candied/lib/dbc/Dbc'
-import type { TrcFrame, ProgressCb } from './trc'
+import type { Frame, ProgressCb } from './frame'
 import { pgnOf, saOf } from './dbc'
 import { extractBits } from './bits'
 
@@ -19,17 +19,11 @@ export type SignalSeries = {
 
 export type DecodedSignal = { name: string; rawValue: number; value: number; unit: string }
 
-const EXTENDED_ID_FLAG = 0x80000000
-
-function is29Bit(id: number): boolean {
-  return (id & EXTENDED_ID_FLAG) !== 0 || id > 0x7ff
-}
-
 function mask29(id: number): number {
   return id & 0x1fffffff
 }
 
-export function decodeFrame(frame: TrcFrame, message: Message): DecodedSignal[] {
+export function decodeFrame(frame: Frame, message: Message): DecodedSignal[] {
   const out: DecodedSignal[] = []
   for (const [, sig] of message.signals) {
     out.push(decodeSignal(frame.data, sig))
@@ -48,17 +42,17 @@ export function seriesKey(signalName: string, sa: number | null): string {
 }
 
 function resolveMessage(
-  frame: TrcFrame,
+  frame: Frame,
   idToMessage: Map<number, Message>,
   pgnToMessage: Map<number, Message>
 ): { message: Message; sa: number | null } | null {
   const id = mask29(frame.id)
   const exact = idToMessage.get(id)
   if (exact) {
-    const sa = is29Bit(frame.id) ? saOf(id) : null
+    const sa = frame.extended ? saOf(id) : null
     return { message: exact, sa }
   }
-  if (is29Bit(frame.id)) {
+  if (frame.extended) {
     const pgn = pgnOf(id)
     const viaPgn = pgnToMessage.get(pgn)
     if (viaPgn) return { message: viaPgn, sa: saOf(id) }
@@ -67,7 +61,7 @@ function resolveMessage(
 }
 
 export async function decodeFrames(
-  frames: TrcFrame[],
+  frames: Frame[],
   idToMessage: Map<number, Message>,
   pgnToMessage: Map<number, Message>,
   onProgress?: ProgressCb

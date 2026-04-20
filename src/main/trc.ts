@@ -1,11 +1,9 @@
 // TRC v2.1 parser. Uses $COLUMNS header to locate fields.
 import { readFile } from 'fs/promises'
+import type { Frame, ProgressCb } from './frame'
 
-export type TrcFrame = { timestamp: number; id: number; data: Uint8Array }
-export type TrcParseResult = { frames: TrcFrame[]; skipped: number }
-
-export type ProgressStage = 'reading' | 'parsing' | 'decoding' | 'indexing'
-export type ProgressCb = (p: { stage: ProgressStage; current: number; total: number }) => void
+export type { Frame, ProgressStage, ProgressCb } from './frame'
+export type TrcParseResult = { frames: Frame[]; skipped: number }
 
 type ColumnMap = { time: number; type: number; id: number; length: number; data: number }
 
@@ -51,7 +49,7 @@ export async function parseTrc(filePath: string, onProgress?: ProgressCb): Promi
   const col = columns
   const minTokens = Math.max(col.time, col.type, col.id, col.length, col.data) + 1
 
-  const frames: TrcFrame[] = []
+  const frames: Frame[] = []
   let skipped = 0
   const total = lines.length
   for (let i = 0; i < lines.length; i++) {
@@ -73,7 +71,7 @@ export async function parseTrc(filePath: string, onProgress?: ProgressCb): Promi
           } else {
             const data = new Uint8Array(dlc)
             for (let b = 0; b < dlc; b++) data[b] = parseInt(tokens[col.data + b], 16)
-            frames.push({ timestamp, id, data })
+            frames.push({ timestamp, id, extended: id > 0x7ff, data })
           }
         }
       }
