@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Plotly from 'plotly.js-dist-min'
-import { lttb, sampleAt, snapTimestamp } from './lttb'
+import { lttb, sampleAt, snapTimestamp, stepSample } from './lttb'
 
 type DbcSummary = { version: string; messageCount: number; signalCount: number }
 type TraceSignalSummary = {
@@ -143,6 +143,39 @@ function App(): React.JSX.Element {
     },
     [maybeSnap]
   )
+
+  useEffect(() => {
+    if (!cursorMode) return
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+      const which = lastCursor.current
+      if (which === null) return
+      const current = which === 'A' ? cursorA : cursorB
+      if (current === null) return
+      const ae = document.activeElement
+      if (ae instanceof HTMLInputElement || ae instanceof HTMLTextAreaElement) return
+      e.preventDefault()
+      const dir = e.key === 'ArrowLeft' ? -1 : 1
+      const mult = e.shiftKey ? 10 : 1
+      let nextVal: number
+      if (cursorSnap) {
+        const payloads = loadedPayloadsForSnap()
+        nextVal = current
+        for (let i = 0; i < mult; i++) {
+          const stepped = stepSample(nextVal, dir, payloads)
+          if (stepped === null) break
+          nextVal = stepped
+        }
+      } else {
+        const span = xRange ? xRange[1] - xRange[0] : 1
+        nextVal = current + dir * mult * 0.005 * span
+      }
+      if (which === 'A') setCursorA(nextVal)
+      else setCursorB(nextVal)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [cursorMode, cursorA, cursorB, cursorSnap, xRange, loadedPayloadsForSnap])
 
   const clearCursors = useCallback(() => {
     setCursorA(null)
