@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Plotly from 'plotly.js-dist-min'
-import { lttb, sampleAt } from './lttb'
+import { lttb, sampleAt, snapTimestamp } from './lttb'
 
 type DbcSummary = { version: string; messageCount: number; signalCount: number }
 type TraceSignalSummary = {
@@ -98,26 +98,51 @@ function App(): React.JSX.Element {
   const [cursorA, setCursorA] = useState<number | null>(null)
   const [cursorB, setCursorB] = useState<number | null>(null)
   const [cursorMode, setCursorMode] = useState(false)
+  const [cursorSnap, setCursorSnap] = useState(true)
   const nextCursor = useRef<'A' | 'B'>('A')
   const lastCursor = useRef<'A' | 'B' | null>(null)
 
-  const onCursorClick = useCallback((t: number) => {
-    if (nextCursor.current === 'A') {
-      setCursorA(t)
-      nextCursor.current = 'B'
-      lastCursor.current = 'A'
-    } else {
-      setCursorB(t)
-      nextCursor.current = 'A'
-      lastCursor.current = 'B'
+  const loadedPayloadsForSnap = useCallback((): { timestamps: Float64Array }[] => {
+    const seen = new Set<string>()
+    const out: { timestamps: Float64Array }[] = []
+    for (const p of [...payloadCache.values()]) {
+      if (seen.has(p.key)) continue
+      seen.add(p.key)
+      out.push({ timestamps: p.timestamps })
     }
+    return out
   }, [])
 
-  const onCursorDrag = useCallback((which: 'A' | 'B', t: number) => {
-    if (which === 'A') setCursorA(t)
-    else setCursorB(t)
-    lastCursor.current = which
-  }, [])
+  const maybeSnap = useCallback(
+    (t: number): number => (cursorSnap ? snapTimestamp(t, loadedPayloadsForSnap()) : t),
+    [cursorSnap, loadedPayloadsForSnap]
+  )
+
+  const onCursorClick = useCallback(
+    (t: number) => {
+      const snapped = maybeSnap(t)
+      if (nextCursor.current === 'A') {
+        setCursorA(snapped)
+        nextCursor.current = 'B'
+        lastCursor.current = 'A'
+      } else {
+        setCursorB(snapped)
+        nextCursor.current = 'A'
+        lastCursor.current = 'B'
+      }
+    },
+    [maybeSnap]
+  )
+
+  const onCursorDrag = useCallback(
+    (which: 'A' | 'B', t: number) => {
+      const snapped = maybeSnap(t)
+      if (which === 'A') setCursorA(snapped)
+      else setCursorB(snapped)
+      lastCursor.current = which
+    },
+    [maybeSnap]
+  )
 
   const clearCursors = useCallback(() => {
     setCursorA(null)
@@ -169,6 +194,7 @@ function App(): React.JSX.Element {
         setCursorA(saved.cursors.a)
         setCursorB(saved.cursors.b)
         setCursorMode(saved.cursors.mode)
+        setCursorSnap(saved.cursors.snap ?? true)
       } finally {
         restored.current = true
       }
@@ -187,11 +213,11 @@ function App(): React.JSX.Element {
         activePaneId,
         filter,
         openGroups: Array.from(openGroups),
-        cursors: { a: cursorA, b: cursorB, mode: cursorMode }
+        cursors: { a: cursorA, b: cursorB, mode: cursorMode, snap: cursorSnap }
       })
     }, 400)
     return () => clearTimeout(handle)
-  }, [dbc, trace, panes, activePaneId, filter, openGroups, cursorA, cursorB, cursorMode])
+  }, [dbc, trace, panes, activePaneId, filter, openGroups, cursorA, cursorB, cursorMode, cursorSnap])
 
   const loadDbcPath = useCallback(async (filePath: string) => {
     setDbcError(null)
@@ -493,6 +519,14 @@ function App(): React.JSX.Element {
                 title="Click on a plot to place cursor A, then B"
               >
                 Cursors: {cursorMode ? 'ON' : 'OFF'}
+              </button>
+              <button
+                type="button"
+                className={cursorSnap ? 'btn--active' : ''}
+                onClick={() => setCursorSnap((v) => !v)}
+                title="Snap cursor to nearest loaded sample"
+              >
+                Snap: {cursorSnap ? 'ON' : 'OFF'}
               </button>
               <button
                 type="button"

@@ -10,7 +10,7 @@ export type Layout = {
   activePaneId: string | null
   filter: string
   openGroups: string[]
-  cursors: { a: number | null; b: number | null; mode: boolean }
+  cursors: { a: number | null; b: number | null; mode: boolean; snap?: boolean }
 }
 
 const layoutPath = (): string => join(app.getPath('userData'), 'layout.json')

@@ -102,6 +102,31 @@ function upperBound(xs: Float64Array, t: number): number {
   return lo
 }
 
+export function snapTimestamp(t: number, payloads: { timestamps: Float64Array }[]): number {
+  let best = t
+  let bestDist = Infinity
+  for (const p of payloads) {
+    const xs = p.timestamps
+    if (xs.length === 0) continue
+    let lo = 0
+    let hi = xs.length - 1
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1
+      if (xs[mid] < t) lo = mid + 1
+      else hi = mid
+    }
+    for (const i of [lo - 1, lo]) {
+      if (i < 0 || i >= xs.length) continue
+      const d = Math.abs(xs[i] - t)
+      if (d < bestDist) {
+        bestDist = d
+        best = xs[i]
+      }
+    }
+  }
+  return best
+}
+
 export function sampleAt(
   xs: Float64Array,
   ys: Float64Array,
