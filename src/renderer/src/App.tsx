@@ -1039,6 +1039,29 @@ function PaneView({
           onChange={(e) => onRename(e.target.value)}
         />
         <div className="pane__actions">
+          <button
+            type="button"
+            disabled={pane.traces.length === 0}
+            onClick={async () => {
+              if (!divRef.current) return
+              const dataUrl = await Plotly.toImage(divRef.current, {
+                format: 'png',
+                width: 1920,
+                height: 1080
+              })
+              const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1)
+              const bin = atob(base64)
+              const bytes = new Uint8Array(bin.length)
+              for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+              await window.api.exportPng({
+                bytes,
+                suggestedName: `${pane.title || 'plot'}.png`
+              })
+            }}
+            title="Export pane as PNG"
+          >
+            PNG
+          </button>
           {total > 1 && (
             <>
               <button type="button" disabled={index === 0} onClick={onMoveUp} title="Move up">

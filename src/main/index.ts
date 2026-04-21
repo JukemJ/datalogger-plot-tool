@@ -184,6 +184,30 @@ app.whenReady().then(() => {
   ipcMain.handle('layout:write', async (_e, layout: Layout): Promise<void> => writeLayout(layout))
 
   ipcMain.handle(
+    'trace:exportPng',
+    async (
+      evt,
+      args: { bytes: Uint8Array; suggestedName: string }
+    ): Promise<{ ok: true; path: string } | { ok: false; error: string }> => {
+      try {
+        const win = BrowserWindow.fromWebContents(evt.sender)
+        const opts = {
+          defaultPath: args.suggestedName || 'plot.png',
+          filters: [{ name: 'PNG', extensions: ['png'] }]
+        }
+        const save = win
+          ? await dialog.showSaveDialog(win, opts)
+          : await dialog.showSaveDialog(opts)
+        if (save.canceled || !save.filePath) return { ok: true, path: '' }
+        await writeFile(save.filePath, Buffer.from(args.bytes))
+        return { ok: true, path: save.filePath }
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
+
+  ipcMain.handle(
     'trace:exportCsv',
     async (
       evt,

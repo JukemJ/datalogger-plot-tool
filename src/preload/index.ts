@@ -11,6 +11,8 @@ const api = {
   writeLayout: (layout: unknown) => ipcRenderer.invoke('layout:write', layout),
   exportCsv: (args: { keys: string[]; xStart: number | null; xEnd: number | null }) =>
     ipcRenderer.invoke('trace:exportCsv', args),
+  exportPng: (args: { bytes: Uint8Array; suggestedName: string }) =>
+    ipcRenderer.invoke('trace:exportPng', args),
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
   onTraceProgress: (
     cb: (p: {

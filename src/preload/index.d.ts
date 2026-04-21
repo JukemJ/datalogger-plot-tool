@@ -66,6 +66,10 @@ export interface Api {
     xStart: number | null
     xEnd: number | null
   }) => Promise<{ ok: true; path: string } | { ok: false; error: string }>
+  exportPng: (args: {
+    bytes: Uint8Array
+    suggestedName: string
+  }) => Promise<{ ok: true; path: string } | { ok: false; error: string }>
   getPathForFile: (file: File) => string
   onTraceProgress: (cb: (p: TraceProgress) => void) => () => void
 }
