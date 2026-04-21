@@ -1,12 +1,12 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
-import { join, extname } from 'path'
+import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 import { loadDbc, type LoadedDbc } from './dbc'
-import { parseTrc } from './trc'
-import { parseMf4 } from './mf4'
-import { decodeFrames, type SignalSeries } from './decode'
-import type { Frame, ProgressCb } from './frame'
+import type { SignalSeries } from './decode'
+import type { ProgressCb } from './frame'
+import { readLayout, writeLayout, type Layout } from './store'
+import { runDecodeWorker } from './workerHost'
 
 function createWindow(): void {
   const mainWindow = new BrowserWindow({
@@ -66,21 +66,11 @@ type TraceLoadResult =
   | { ok: false; error: string }
 
 let currentDbc: LoadedDbc | null = null
+let currentDbcPath: string | null = null
 let currentSeries: Map<string, SignalSeries> | null = null
 
-async function ingestFrames(
-  frames: Frame[],
-  skipped: number,
-  warnings: string[],
-  emit: ProgressCb
-): Promise<TraceLoadResult> {
-  if (!currentDbc) return { ok: false, error: 'Load a DBC first.' }
-  if (!currentDbc.decodable) {
-    return { ok: false, error: 'Drop a .dbc file to enable decoding (JSON cannot decode).' }
-  }
-  const series = await decodeFrames(frames, currentDbc.idToMessage, currentDbc.pgnToMessage, emit)
-  currentSeries = series
-  const signals: TraceSignalSummary[] = Array.from(series.entries())
+function summarize(series: Map<string, SignalSeries>): TraceSignalSummary[] {
+  return Array.from(series.entries())
     .map(([key, s]) => ({
       key,
       signalName: s.signalName,
@@ -97,7 +87,6 @@ async function ingestFrames(
         a.signalName.localeCompare(b.signalName) ||
         (a.sa ?? -1) - (b.sa ?? -1)
     )
-  return { ok: true, frameCount: frames.length, skipped, signals, warnings }
 }
 
 app.whenReady().then(() => {
@@ -108,6 +97,7 @@ app.whenReady().then(() => {
     try {
       const loaded = await loadDbc(filePath)
       currentDbc = loaded
+      currentDbcPath = filePath
       currentSeries = null
       return {
         ok: true,
@@ -133,17 +123,24 @@ app.whenReady().then(() => {
 
   ipcMain.handle('trace:load', async (evt, filePath: string): Promise<TraceLoadResult> => {
     try {
+      if (!currentDbc || !currentDbcPath) return { ok: false, error: 'Load a DBC first.' }
+      if (!currentDbc.decodable) {
+        return { ok: false, error: 'Drop a .dbc file to enable decoding (JSON cannot decode).' }
+      }
       const emit: ProgressCb = (p) => evt.sender.send('trace:progress', p)
-      const ext = extname(filePath).toLowerCase()
-      if (ext === '.mf4') {
-        const { frames, skipped, warnings } = await parseMf4(filePath, emit)
-        return ingestFrames(frames, skipped, warnings, emit)
+      const { series, frameCount, skipped, warnings } = await runDecodeWorker(
+        filePath,
+        currentDbcPath,
+        emit
+      )
+      currentSeries = series
+      return {
+        ok: true,
+        frameCount,
+        skipped,
+        signals: summarize(series),
+        warnings
       }
-      if (ext === '.trc') {
-        const { frames, skipped } = await parseTrc(filePath, emit)
-        return ingestFrames(frames, skipped, [], emit)
-      }
-      return { ok: false, error: `Unsupported trace extension: ${ext}` }
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) }
     }
@@ -175,6 +172,9 @@ app.whenReady().then(() => {
       values: s.values
     }
   })
+
+  ipcMain.handle('layout:read', async (): Promise<Layout | null> => readLayout())
+  ipcMain.handle('layout:write', async (_e, layout: Layout): Promise<void> => writeLayout(layout))
 
   createWindow()
   app.on('activate', () => {
