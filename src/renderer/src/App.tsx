@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Plotly from 'plotly.js-dist-min'
+import { lttb, sampleAt } from './lttb'
 
 type DbcSummary = { version: string; messageCount: number; signalCount: number }
 type TraceSignalSummary = {
@@ -8,6 +9,7 @@ type TraceSignalSummary = {
   messageName: string
   sa: number | null
   unit: string
+  enum: Record<number, string> | null
   count: number
 }
 type SignalPayload = {
@@ -16,9 +18,12 @@ type SignalPayload = {
   messageName: string
   sa: number | null
   unit: string
+  enum: Record<number, string> | null
   timestamps: Float64Array
   values: Float64Array
 }
+
+const LTTB_THRESHOLD = 2000
 type ProgressStage = 'reading' | 'parsing' | 'decoding' | 'indexing'
 type TraceProgress = { stage: ProgressStage; current: number; total: number }
 
@@ -56,6 +61,16 @@ function traceLabel(p: SignalPayload): string {
   return p.sa === null ? p.signalName : `${p.signalName} @ SA ${formatSa(p.sa)}`
 }
 
+function formatSample(v: number | null, p: SignalPayload): string {
+  if (v === null) return '—'
+  if (p.enum) {
+    const nearest = Math.round(v)
+    const label = p.enum[nearest]
+    if (label !== undefined) return label
+  }
+  return v.toFixed(3)
+}
+
 function nextPaneId(): string {
   return `p${Math.random().toString(36).slice(2, 9)}`
 }
@@ -79,6 +94,27 @@ function App(): React.JSX.Element {
 
   const [xRange, setXRange] = useState<[number, number] | null>(null)
   const xRangeSource = useRef<string | null>(null)
+
+  const [cursorA, setCursorA] = useState<number | null>(null)
+  const [cursorB, setCursorB] = useState<number | null>(null)
+  const [cursorMode, setCursorMode] = useState(false)
+  const nextCursor = useRef<'A' | 'B'>('A')
+
+  const onCursorClick = useCallback((t: number) => {
+    if (nextCursor.current === 'A') {
+      setCursorA(t)
+      nextCursor.current = 'B'
+    } else {
+      setCursorB(t)
+      nextCursor.current = 'A'
+    }
+  }, [])
+
+  const clearCursors = useCallback(() => {
+    setCursorA(null)
+    setCursorB(null)
+    nextCursor.current = 'A'
+  }, [])
 
   useEffect(() => {
     const unsub = window.api.onTraceProgress((p) => setProgress(p))
@@ -378,6 +414,21 @@ function App(): React.JSX.Element {
               <button type="button" onClick={addPane}>
                 + Add plot
               </button>
+              <button
+                type="button"
+                className={cursorMode ? 'btn--active' : ''}
+                onClick={() => setCursorMode((v) => !v)}
+                title="Click on a plot to place cursor A, then B"
+              >
+                Cursors: {cursorMode ? 'ON' : 'OFF'}
+              </button>
+              <button
+                type="button"
+                onClick={clearCursors}
+                disabled={cursorA === null && cursorB === null}
+              >
+                Clear cursors
+              </button>
             </div>
             {panes.map((pane, idx) => (
               <PaneView
@@ -396,6 +447,10 @@ function App(): React.JSX.Element {
                 xRange={xRange}
                 xRangeSource={xRangeSource.current}
                 onXZoom={(r) => onPaneXZoom(pane.id, r)}
+                cursorA={cursorA}
+                cursorB={cursorB}
+                cursorMode={cursorMode}
+                onCursorClick={onCursorClick}
               />
             ))}
           </section>
@@ -556,7 +611,11 @@ function PaneView({
   onRemoveTrace,
   xRange,
   xRangeSource,
-  onXZoom
+  onXZoom,
+  cursorA,
+  cursorB,
+  cursorMode,
+  onCursorClick
 }: {
   pane: Pane
   index: number
@@ -572,6 +631,10 @@ function PaneView({
   xRange: [number, number] | null
   xRangeSource: string | null
   onXZoom: (r: [number, number] | null) => void
+  cursorA: number | null
+  cursorB: number | null
+  cursorMode: boolean
+  onCursorClick: (t: number) => void
 }): React.JSX.Element {
   const divRef = useRef<HTMLDivElement>(null)
   const [payloads, setPayloads] = useState<Map<string, SignalPayload>>(new Map())
@@ -620,20 +683,59 @@ function PaneView({
       Plotly.purge(divRef.current)
       return
     }
+    const x0 = xRange ? xRange[0] : undefined
+    const x1 = xRange ? xRange[1] : undefined
     const traces = pane.traces
       .map((t) => {
         const p = payloads.get(t.key)
         if (!p) return null
+        const sampled = lttb(p.timestamps, p.values, LTTB_THRESHOLD, x0, x1)
+        const label = traceLabel(p)
+        const text = p.enum
+          ? sampled.y.map((v) => p.enum![Math.round(v)] ?? v.toFixed(3))
+          : undefined
         return {
           type: 'scatter' as const,
           mode: 'lines' as const,
-          x: Array.from(p.timestamps),
-          y: Array.from(p.values),
-          name: traceLabel(p),
-          yaxis: t.axis === 'right' ? 'y2' : 'y'
+          x: sampled.x,
+          y: sampled.y,
+          name: label,
+          yaxis: t.axis === 'right' ? 'y2' : 'y',
+          text,
+          hovertemplate: p.enum
+            ? `%{text}<br>t=%{x:.3f}s<extra>${label}</extra>`
+            : `%{y:.3f}${p.unit ? ' ' + p.unit : ''}<br>t=%{x:.3f}s<extra>${label}</extra>`
         }
       })
       .filter((t): t is NonNullable<typeof t> => t !== null)
+
+    const shapes: Partial<Plotly.Shape>[] = []
+    const annotations: Partial<Plotly.Annotations>[] = []
+    const addCursor = (x: number, color: string, label: string): void => {
+      shapes.push({
+        type: 'line',
+        xref: 'x',
+        yref: 'paper',
+        x0: x,
+        x1: x,
+        y0: 0,
+        y1: 1,
+        line: { color, width: 1, dash: 'dash' }
+      })
+      annotations.push({
+        xref: 'x',
+        yref: 'paper',
+        x,
+        y: 1,
+        yanchor: 'bottom',
+        text: label,
+        showarrow: false,
+        font: { color, size: 11 },
+        bgcolor: '#1a1b1e'
+      })
+    }
+    if (cursorA !== null) addCursor(cursorA, '#4aa3ff', 'A')
+    if (cursorB !== null) addCursor(cursorB, '#ff8c5a', 'B')
 
     const layout: Partial<Plotly.Layout> = {
       margin: { l: 60, r: 60, t: 10, b: 40 },
@@ -649,38 +751,74 @@ function PaneView({
         title: { text: axisTitle(rightUnits) },
         showgrid: false
       },
-      showlegend: false
+      showlegend: false,
+      shapes,
+      annotations
     }
     Plotly.react(divRef.current, traces, layout, { responsive: true, displaylogo: false })
 
-    const handler = (ev: Plotly.PlotRelayoutEvent): void => {
+    const relayoutHandler = (ev: Plotly.PlotRelayoutEvent): void => {
       if (zoomDebounce.current) clearTimeout(zoomDebounce.current)
       zoomDebounce.current = setTimeout(() => {
         if (ev['xaxis.autorange']) {
           onXZoom(null)
           return
         }
-        const x0 = ev['xaxis.range[0]']
-        const x1 = ev['xaxis.range[1]']
-        if (typeof x0 === 'number' && typeof x1 === 'number') onXZoom([x0, x1])
+        const rx0 = ev['xaxis.range[0]']
+        const rx1 = ev['xaxis.range[1]']
+        if (typeof rx0 === 'number' && typeof rx1 === 'number') onXZoom([rx0, rx1])
       }, 16)
     }
+    const clickHandler = (ev: Plotly.PlotMouseEvent): void => {
+      if (!cursorMode) return
+      const x = ev.points?.[0]?.x
+      if (typeof x === 'number') onCursorClick(x)
+    }
     const el = divRef.current as unknown as {
-      on: (ev: string, cb: (e: Plotly.PlotRelayoutEvent) => void) => void
+      on: (ev: string, cb: (e: unknown) => void) => void
       removeAllListeners: (ev: string) => void
     }
-    el.on('plotly_relayout', handler)
+    el.on('plotly_relayout', relayoutHandler as (e: unknown) => void)
+    el.on('plotly_click', clickHandler as (e: unknown) => void)
     return () => {
       el.removeAllListeners?.('plotly_relayout')
+      el.removeAllListeners?.('plotly_click')
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pane.traces, payloads, leftUnits, rightUnits])
+  }, [pane.traces, payloads, leftUnits, rightUnits, xRange, cursorA, cursorB, cursorMode])
 
   useEffect(() => {
     if (!divRef.current || pane.traces.length === 0) return
     if (xRangeSource === pane.id) return
-    Plotly.relayout(divRef.current, xRange ? { 'xaxis.range': xRange } : { 'xaxis.autorange': true })
+    Plotly.relayout(
+      divRef.current,
+      xRange ? { 'xaxis.range': xRange } : { 'xaxis.autorange': true }
+    )
   }, [xRange, xRangeSource, pane.id, pane.traces.length])
+
+  const cursorRows = useMemo(() => {
+    if (cursorA === null && cursorB === null) return null
+    const rows = pane.traces.map((t) => {
+      const p = payloads.get(t.key)
+      if (!p) return { key: t.key, name: t.key, unit: '', a: null, b: null, delta: null, isEnum: false }
+      const a =
+        cursorA !== null ? sampleAt(p.timestamps, p.values, cursorA, !!p.enum) : null
+      const b =
+        cursorB !== null ? sampleAt(p.timestamps, p.values, cursorB, !!p.enum) : null
+      const delta = a !== null && b !== null ? b - a : null
+      return {
+        key: t.key,
+        name: traceLabel(p),
+        unit: p.unit,
+        a: a !== null ? formatSample(a, p) : null,
+        b: b !== null ? formatSample(b, p) : null,
+        delta,
+        isEnum: !!p.enum,
+        payload: p
+      }
+    })
+    return rows
+  }, [pane.traces, payloads, cursorA, cursorB])
 
   return (
     <div
@@ -720,6 +858,42 @@ function PaneView({
       ) : (
         <>
           <div ref={divRef} className="plot" />
+          {cursorRows && (
+            <div className="cursor-readout">
+              <div className="cursor-readout__time">
+                {cursorA !== null && <span>A = {cursorA.toFixed(3)}s</span>}
+                {cursorB !== null && <span>B = {cursorB.toFixed(3)}s</span>}
+                {cursorA !== null && cursorB !== null && (
+                  <span>Δt = {(cursorB - cursorA).toFixed(3)}s</span>
+                )}
+              </div>
+              <div className="cursor-readout__rows">
+                {cursorRows.map((r) => (
+                  <div key={r.key} className="cursor-readout__row">
+                    <span className="cursor-readout__name">{r.name}</span>
+                    {r.a !== null && (
+                      <span>
+                        A={r.a}
+                        {r.unit && !r.isEnum ? ` ${r.unit}` : ''}
+                      </span>
+                    )}
+                    {r.b !== null && (
+                      <span>
+                        B={r.b}
+                        {r.unit && !r.isEnum ? ` ${r.unit}` : ''}
+                      </span>
+                    )}
+                    {r.delta !== null && !r.isEnum && (
+                      <span>
+                        Δ={r.delta.toFixed(3)}
+                        {r.unit ? ` ${r.unit}` : ''}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           <div className="pane__legend">
             {pane.traces.map((t) => {
               const p = payloads.get(t.key)

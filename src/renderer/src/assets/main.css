@@ -301,6 +301,42 @@ body {
   font-size: 12px;
 }
 
+.cursor-readout {
+  padding: 6px 10px;
+  border-top: 1px solid #2a2b2d;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.cursor-readout__time {
+  display: flex;
+  gap: 16px;
+  color: #c8c8c8;
+  padding-bottom: 4px;
+}
+
+.cursor-readout__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.cursor-readout__row {
+  display: flex;
+  gap: 14px;
+  align-items: baseline;
+}
+
+.cursor-readout__name {
+  color: #e6e6e6;
+  min-width: 220px;
+}
+
+.btn--active {
+  background: #2a5c8a !important;
+  color: #fff !important;
+}
+
 .legend-item {
   display: inline-flex;
   align-items: center;

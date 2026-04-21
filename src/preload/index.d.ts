@@ -15,6 +15,7 @@ export type TraceSignalSummary = {
   messageName: string
   sa: number | null
   unit: string
+  enum: Record<number, string> | null
   count: number
 }
 export type TraceLoadResult =
@@ -33,6 +34,7 @@ export type SignalPayload = {
   messageName: string
   sa: number | null
   unit: string
+  enum: Record<number, string> | null
   timestamps: Float64Array
   values: Float64Array
 }

@@ -51,6 +51,7 @@ export type TraceSignalSummary = {
   messageName: string
   sa: number | null
   unit: string
+  enum: Record<number, string> | null
   count: number
 }
 
@@ -86,6 +87,7 @@ async function ingestFrames(
       messageName: s.messageName,
       sa: s.sa,
       unit: s.unit,
+      enum: s.enum,
       count: s.timestamps.length
     }))
     .filter((s) => s.count > 0)
@@ -168,6 +170,7 @@ app.whenReady().then(() => {
       messageName: s.messageName,
       sa: s.sa,
       unit: s.unit,
+      enum: s.enum,
       timestamps: s.timestamps,
       values: s.values
     }

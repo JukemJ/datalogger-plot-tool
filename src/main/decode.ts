@@ -13,6 +13,7 @@ export type SignalSeries = {
   messageName: string
   sa: number | null
   unit: string
+  enum: Record<number, string> | null
   timestamps: Float64Array
   values: Float64Array
 }
@@ -70,7 +71,13 @@ export async function decodeFrames(
   const counts = new Map<string, number>()
   const meta = new Map<
     string,
-    { signalName: string; messageName: string; sa: number | null; unit: string }
+    {
+      signalName: string
+      messageName: string
+      sa: number | null
+      unit: string
+      enum: Record<number, string> | null
+    }
   >()
   for (let i = 0; i < frames.length; i++) {
     const f = frames[i]
@@ -84,7 +91,11 @@ export async function decodeFrames(
             signalName: sig.name,
             messageName: r.message.name,
             sa: r.sa,
-            unit: sig.unit ?? ''
+            unit: sig.unit ?? '',
+            enum:
+              sig.valueTable && sig.valueTable.size > 0
+                ? Object.fromEntries(sig.valueTable)
+                : null
           })
       }
     }
@@ -104,6 +115,7 @@ export async function decodeFrames(
       messageName: m.messageName,
       sa: m.sa,
       unit: m.unit,
+      enum: m.enum,
       timestamps: new Float64Array(n),
       values: new Float64Array(n)
     })
