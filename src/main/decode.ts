@@ -1,6 +1,6 @@
 import type { Message, Signal } from 'candied/lib/dbc/Dbc'
 import type { Frame, ProgressCb } from './frame'
-import { pgnOf, saOf } from './dbc'
+import { pgnOf, saOf, longMessageName, longSignalName } from './dbc'
 import { extractBits } from './bits'
 
 const DECODE_CHUNK = 50_000
@@ -69,6 +69,22 @@ export async function decodeFrames(
 ): Promise<Map<string, SignalSeries>> {
   const total = frames.length
   const counts = new Map<string, number>()
+  const sigNameCache = new WeakMap<Signal, string>()
+  const msgNameCache = new WeakMap<Message, string>()
+  const resolveSigName = (sig: Signal): string => {
+    const hit = sigNameCache.get(sig)
+    if (hit !== undefined) return hit
+    const n = longSignalName(sig)
+    sigNameCache.set(sig, n)
+    return n
+  }
+  const resolveMsgName = (msg: Message): string => {
+    const hit = msgNameCache.get(msg)
+    if (hit !== undefined) return hit
+    const n = longMessageName(msg)
+    msgNameCache.set(msg, n)
+    return n
+  }
   const meta = new Map<
     string,
     {
@@ -84,12 +100,13 @@ export async function decodeFrames(
     const r = resolveMessage(f, idToMessage, pgnToMessage)
     if (r) {
       for (const [, sig] of r.message.signals) {
-        const key = seriesKey(sig.name, r.sa)
+        const signalName = resolveSigName(sig)
+        const key = seriesKey(signalName, r.sa)
         counts.set(key, (counts.get(key) ?? 0) + 1)
         if (!meta.has(key))
           meta.set(key, {
-            signalName: sig.name,
-            messageName: r.message.name,
+            signalName,
+            messageName: resolveMsgName(r.message),
             sa: r.sa,
             unit: sig.unit ?? '',
             enum:
@@ -127,7 +144,7 @@ export async function decodeFrames(
     const r = resolveMessage(f, idToMessage, pgnToMessage)
     if (r) {
       for (const [, sig] of r.message.signals) {
-        const key = seriesKey(sig.name, r.sa)
+        const key = seriesKey(resolveSigName(sig), r.sa)
         const series = store.get(key)!
         const idx = writeIdx.get(key)!
         const raw = extractBits(f.data, sig.startBit, sig.length, sig.endian, sig.signed)

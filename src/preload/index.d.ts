@@ -42,12 +42,25 @@ export type SignalPayload = {
 export type ProgressStage = 'reading' | 'parsing' | 'decoding' | 'indexing'
 export type TraceProgress = { stage: ProgressStage; current: number; total: number }
 
+export type Layout = {
+  version: 1
+  dbcPath: string | null
+  tracePath: string | null
+  panes: { id: string; title: string; traces: { key: string; axis: 'left' | 'right' }[] }[]
+  activePaneId: string | null
+  filter: string
+  openGroups: string[]
+  cursors: { a: number | null; b: number | null; mode: boolean }
+}
+
 export interface Api {
   loadDbc: (filePath: string) => Promise<DbcLoadResult>
   pickDbc: () => Promise<string | null>
   loadTrace: (filePath: string) => Promise<TraceLoadResult>
   pickTrace: () => Promise<string | null>
   getSignal: (key: string) => Promise<SignalPayload | null>
+  readLayout: () => Promise<Layout | null>
+  writeLayout: (layout: Layout) => Promise<void>
   getPathForFile: (file: File) => string
   onTraceProgress: (cb: (p: TraceProgress) => void) => () => void
 }

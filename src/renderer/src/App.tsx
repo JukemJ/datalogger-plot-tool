@@ -121,6 +121,68 @@ function App(): React.JSX.Element {
     return unsub
   }, [])
 
+  const restored = useRef(false)
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const saved = await window.api.readLayout()
+        if (!saved) return
+        if (saved.dbcPath) {
+          const result = await window.api.loadDbc(saved.dbcPath)
+          if (!result.ok) {
+            setDbcError(`Could not restore last DBC: ${saved.dbcPath}`)
+            return
+          }
+          setDbc({ path: saved.dbcPath, summary: result.summary, decodable: result.decodable })
+          if (saved.tracePath) {
+            const tr = await window.api.loadTrace(saved.tracePath)
+            if (tr.ok) {
+              setTrace({
+                path: saved.tracePath,
+                frameCount: tr.frameCount,
+                skipped: tr.skipped,
+                warnings: tr.warnings
+              })
+              setSignals(tr.signals)
+            } else {
+              setTraceError(`Could not restore last trace: ${saved.tracePath}`)
+            }
+          }
+        }
+        if (saved.panes.length > 0) {
+          setPanes(saved.panes)
+          setActivePaneId(saved.activePaneId ?? saved.panes[0].id)
+        }
+        setFilter(saved.filter)
+        setOpenGroups(new Set(saved.openGroups))
+        setCursorA(saved.cursors.a)
+        setCursorB(saved.cursors.b)
+        setCursorMode(saved.cursors.mode)
+      } finally {
+        restored.current = true
+      }
+    })()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  useEffect(() => {
+    if (!restored.current) return
+    const handle = setTimeout(() => {
+      void window.api.writeLayout({
+        version: 1,
+        dbcPath: dbc?.path ?? null,
+        tracePath: trace?.path ?? null,
+        panes,
+        activePaneId,
+        filter,
+        openGroups: Array.from(openGroups),
+        cursors: { a: cursorA, b: cursorB, mode: cursorMode }
+      })
+    }, 400)
+    return () => clearTimeout(handle)
+  }, [dbc, trace, panes, activePaneId, filter, openGroups, cursorA, cursorB, cursorMode])
+
   const loadDbcPath = useCallback(async (filePath: string) => {
     setDbcError(null)
     setShowDbcPicker(false)

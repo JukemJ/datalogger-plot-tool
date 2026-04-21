@@ -7,6 +7,8 @@ const api = {
   loadTrace: (filePath: string) => ipcRenderer.invoke('trace:load', filePath),
   pickTrace: () => ipcRenderer.invoke('trace:pick'),
   getSignal: (key: string) => ipcRenderer.invoke('trace:getSignal', key),
+  readLayout: () => ipcRenderer.invoke('layout:read'),
+  writeLayout: (layout: unknown) => ipcRenderer.invoke('layout:write', layout),
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
   onTraceProgress: (
     cb: (p: {

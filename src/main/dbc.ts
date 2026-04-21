@@ -1,7 +1,7 @@
 import { readFile } from 'fs/promises'
 import { extname } from 'path'
 import { Dbc } from 'candied'
-import type { Message } from 'candied/lib/dbc/Dbc'
+import type { Message, Signal } from 'candied/lib/dbc/Dbc'
 
 export type SignalInfo = { name: string; unit: string }
 export type MessageInfo = { id: number; name: string; signals: SignalInfo[] }
@@ -36,6 +36,20 @@ export function saOf(id29: number): number {
   return id29 & 0xff
 }
 
+export function longMessageName(msg: Message): string {
+  const v = msg.attributes.get('SystemMessageLongSymbol')?.value
+  if (typeof v !== 'string') return msg.name
+  const cleaned = v.replace(/"/g, '').trim()
+  return cleaned.length > 0 && cleaned !== msg.name ? cleaned : msg.name
+}
+
+export function longSignalName(sig: Signal): string {
+  const v = sig.attributes.get('SystemSignalLongSymbol')?.value
+  if (typeof v !== 'string') return sig.name
+  const cleaned = v.replace(/"/g, '').trim()
+  return cleaned.length > 0 && cleaned !== sig.name ? cleaned : sig.name
+}
+
 function isJ1939Message(msg: Message): boolean {
   const attr = msg.attributes.get('VFrameFormat')
   const val = attr?.value ?? attr?.defaultValue
@@ -60,8 +74,9 @@ function catalogFromData(data: ReturnType<Dbc['load']>): {
   let signalCount = 0
   for (const [, msg] of data.messages) {
     const signals: SignalInfo[] = []
-    for (const [, sig] of msg.signals) signals.push({ name: sig.name, unit: sig.unit ?? '' })
-    messages.push({ id: msg.id, name: msg.name, signals })
+    for (const [, sig] of msg.signals)
+      signals.push({ name: longSignalName(sig), unit: sig.unit ?? '' })
+    messages.push({ id: msg.id, name: longMessageName(msg), signals })
     idToMessage.set(mask29(msg.id), msg)
     if (isJ1939Message(msg)) {
       const pgn = pgnOf(mask29(msg.id))
