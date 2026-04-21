@@ -102,6 +102,41 @@ function upperBound(xs: Float64Array, t: number): number {
   return lo
 }
 
+export function statsInRange(
+  xs: Float64Array,
+  ys: Float64Array,
+  a: number,
+  b: number
+): { min: number; max: number; mean: number; count: number } | null {
+  const [lo, hi] = a <= b ? [a, b] : [b, a]
+  let i0 = 0
+  let j = xs.length
+  while (i0 < j) {
+    const mid = (i0 + j) >>> 1
+    if (xs[mid] < lo) i0 = mid + 1
+    else j = mid
+  }
+  let i1 = i0
+  j = xs.length
+  while (i1 < j) {
+    const mid = (i1 + j) >>> 1
+    if (xs[mid] <= hi) i1 = mid + 1
+    else j = mid
+  }
+  if (i1 <= i0) return null
+  let mn = Infinity
+  let mx = -Infinity
+  let sum = 0
+  for (let i = i0; i < i1; i++) {
+    const v = ys[i]
+    if (v < mn) mn = v
+    if (v > mx) mx = v
+    sum += v
+  }
+  const n = i1 - i0
+  return { min: mn, max: mx, mean: sum / n, count: n }
+}
+
 export function stepSample(
   t: number,
   dir: -1 | 1,

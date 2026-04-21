@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Plotly from 'plotly.js-dist-min'
-import { lttb, sampleAt, snapTimestamp, stepSample } from './lttb'
+import { lttb, sampleAt, snapTimestamp, statsInRange, stepSample } from './lttb'
 
 type DbcSummary = { version: string; messageCount: number; signalCount: number }
 type TraceSignalSummary = {
@@ -959,12 +959,42 @@ function PaneView({
     if (cursorA === null && cursorB === null) return null
     const rows = pane.traces.map((t) => {
       const p = payloads.get(t.key)
-      if (!p) return { key: t.key, name: t.key, unit: '', a: null, b: null, delta: null, isEnum: false }
+      if (!p)
+        return {
+          key: t.key,
+          name: t.key,
+          unit: '',
+          a: null,
+          b: null,
+          delta: null,
+          isEnum: false,
+          stats: null as null | { min: string; max: string; mean: string; count: number }
+        }
       const a =
         cursorA !== null ? sampleAt(p.timestamps, p.values, cursorA, !!p.enum) : null
       const b =
         cursorB !== null ? sampleAt(p.timestamps, p.values, cursorB, !!p.enum) : null
       const delta = a !== null && b !== null ? b - a : null
+      let stats: { min: string; max: string; mean: string; count: number } | null = null
+      if (cursorA !== null && cursorB !== null) {
+        const raw = statsInRange(p.timestamps, p.values, cursorA, cursorB)
+        if (raw) {
+          if (p.enum) {
+            const mnLbl = p.enum[Math.round(raw.min)]
+            const same = raw.min === raw.max && mnLbl !== undefined
+            stats = same
+              ? { min: mnLbl, max: mnLbl, mean: mnLbl, count: raw.count }
+              : { min: '—', max: '—', mean: '—', count: raw.count }
+          } else {
+            stats = {
+              min: raw.min.toFixed(3),
+              max: raw.max.toFixed(3),
+              mean: raw.mean.toFixed(3),
+              count: raw.count
+            }
+          }
+        }
+      }
       return {
         key: t.key,
         name: traceLabel(p),
@@ -973,7 +1003,7 @@ function PaneView({
         b: b !== null ? formatSample(b, p) : null,
         delta,
         isEnum: !!p.enum,
-        payload: p
+        stats
       }
     })
     return rows
@@ -1047,6 +1077,14 @@ function PaneView({
                         Δ={r.delta.toFixed(3)}
                         {r.unit ? ` ${r.unit}` : ''}
                       </span>
+                    )}
+                    {r.stats && (
+                      <>
+                        <span>min={r.stats.min}</span>
+                        <span>max={r.stats.max}</span>
+                        <span>mean={r.stats.mean}</span>
+                        <span className="cursor-readout__count">n={r.stats.count}</span>
+                      </>
                     )}
                   </div>
                 ))}
