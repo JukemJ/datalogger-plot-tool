@@ -99,21 +99,31 @@ function App(): React.JSX.Element {
   const [cursorB, setCursorB] = useState<number | null>(null)
   const [cursorMode, setCursorMode] = useState(false)
   const nextCursor = useRef<'A' | 'B'>('A')
+  const lastCursor = useRef<'A' | 'B' | null>(null)
 
   const onCursorClick = useCallback((t: number) => {
     if (nextCursor.current === 'A') {
       setCursorA(t)
       nextCursor.current = 'B'
+      lastCursor.current = 'A'
     } else {
       setCursorB(t)
       nextCursor.current = 'A'
+      lastCursor.current = 'B'
     }
+  }, [])
+
+  const onCursorDrag = useCallback((which: 'A' | 'B', t: number) => {
+    if (which === 'A') setCursorA(t)
+    else setCursorB(t)
+    lastCursor.current = which
   }, [])
 
   const clearCursors = useCallback(() => {
     setCursorA(null)
     setCursorB(null)
     nextCursor.current = 'A'
+    lastCursor.current = null
   }, [])
 
   useEffect(() => {
@@ -513,6 +523,7 @@ function App(): React.JSX.Element {
                 cursorB={cursorB}
                 cursorMode={cursorMode}
                 onCursorClick={onCursorClick}
+                onCursorDrag={onCursorDrag}
               />
             ))}
           </section>
@@ -677,7 +688,8 @@ function PaneView({
   cursorA,
   cursorB,
   cursorMode,
-  onCursorClick
+  onCursorClick,
+  onCursorDrag
 }: {
   pane: Pane
   index: number
@@ -697,6 +709,7 @@ function PaneView({
   cursorB: number | null
   cursorMode: boolean
   onCursorClick: (t: number) => void
+  onCursorDrag: (which: 'A' | 'B', t: number) => void
 }): React.JSX.Element {
   const divRef = useRef<HTMLDivElement>(null)
   const [payloads, setPayloads] = useState<Map<string, SignalPayload>>(new Map())
@@ -773,7 +786,10 @@ function PaneView({
 
     const shapes: Partial<Plotly.Shape>[] = []
     const annotations: Partial<Plotly.Annotations>[] = []
-    const addCursor = (x: number, color: string, label: string): void => {
+    let aShapeIdx = -1
+    let bShapeIdx = -1
+    const addCursor = (x: number, color: string, label: string): number => {
+      const idx = shapes.length
       shapes.push({
         type: 'line',
         xref: 'x',
@@ -795,9 +811,10 @@ function PaneView({
         font: { color, size: 11 },
         bgcolor: '#1a1b1e'
       })
+      return idx
     }
-    if (cursorA !== null) addCursor(cursorA, '#4aa3ff', 'A')
-    if (cursorB !== null) addCursor(cursorB, '#ff8c5a', 'B')
+    if (cursorA !== null) aShapeIdx = addCursor(cursorA, '#4aa3ff', 'A')
+    if (cursorB !== null) bShapeIdx = addCursor(cursorB, '#ff8c5a', 'B')
 
     const layout: Partial<Plotly.Layout> = {
       margin: { l: 60, r: 60, t: 10, b: 40 },
@@ -817,9 +834,22 @@ function PaneView({
       shapes,
       annotations
     }
-    Plotly.react(divRef.current, traces, layout, { responsive: true, displaylogo: false })
+    Plotly.react(divRef.current, traces, layout, {
+      responsive: true,
+      displaylogo: false,
+      edits: { shapePosition: true }
+    })
 
     const relayoutHandler = (ev: Plotly.PlotRelayoutEvent): void => {
+      for (const k of Object.keys(ev)) {
+        const m = k.match(/^shapes\[(\d+)\]\.x0$/)
+        if (!m) continue
+        const idx = Number(m[1])
+        const x = (ev as Record<string, unknown>)[k]
+        if (typeof x !== 'number') continue
+        if (idx === aShapeIdx) onCursorDrag('A', x)
+        else if (idx === bShapeIdx) onCursorDrag('B', x)
+      }
       if (zoomDebounce.current) clearTimeout(zoomDebounce.current)
       zoomDebounce.current = setTimeout(() => {
         if (ev['xaxis.autorange']) {
