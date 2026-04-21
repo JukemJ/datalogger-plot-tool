@@ -61,6 +61,11 @@ export interface Api {
   getSignal: (key: string) => Promise<SignalPayload | null>
   readLayout: () => Promise<Layout | null>
   writeLayout: (layout: Layout) => Promise<void>
+  exportCsv: (args: {
+    keys: string[]
+    xStart: number | null
+    xEnd: number | null
+  }) => Promise<{ ok: true; path: string } | { ok: false; error: string }>
   getPathForFile: (file: File) => string
   onTraceProgress: (cb: (p: TraceProgress) => void) => () => void
 }

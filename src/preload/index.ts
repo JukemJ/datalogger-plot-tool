@@ -9,6 +9,8 @@ const api = {
   getSignal: (key: string) => ipcRenderer.invoke('trace:getSignal', key),
   readLayout: () => ipcRenderer.invoke('layout:read'),
   writeLayout: (layout: unknown) => ipcRenderer.invoke('layout:write', layout),
+  exportCsv: (args: { keys: string[]; xStart: number | null; xEnd: number | null }) =>
+    ipcRenderer.invoke('trace:exportCsv', args),
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
   onTraceProgress: (
     cb: (p: {

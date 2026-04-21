@@ -568,6 +568,23 @@ function App(): React.JSX.Element {
               >
                 Clear cursors
               </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  const active = panes.find((p) => p.id === activePaneId)
+                  if (!active || active.traces.length === 0) return
+                  const r = await window.api.exportCsv({
+                    keys: active.traces.map((t) => t.key),
+                    xStart: xRange ? xRange[0] : null,
+                    xEnd: xRange ? xRange[1] : null
+                  })
+                  if (!r.ok) setTraceError(r.error)
+                }}
+                disabled={(panes.find((p) => p.id === activePaneId)?.traces.length ?? 0) === 0}
+                title="Export active pane as CSV (current zoom)"
+              >
+                Export CSV
+              </button>
             </div>
             {panes.map((pane, idx) => (
               <PaneView

@@ -1,4 +1,5 @@
 import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
+import { writeFile } from 'fs/promises'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -68,6 +69,12 @@ type TraceLoadResult =
 let currentDbc: LoadedDbc | null = null
 let currentDbcPath: string | null = null
 let currentSeries: Map<string, SignalSeries> | null = null
+
+function labelFor(s: SignalSeries): string {
+  if (s.sa === null) return s.signalName
+  const hex = `0x${s.sa.toString(16).padStart(2, '0').toUpperCase()}`
+  return `${s.signalName}@${hex}`
+}
 
 function summarize(series: Map<string, SignalSeries>): TraceSignalSummary[] {
   return Array.from(series.entries())
@@ -175,6 +182,78 @@ app.whenReady().then(() => {
 
   ipcMain.handle('layout:read', async (): Promise<Layout | null> => readLayout())
   ipcMain.handle('layout:write', async (_e, layout: Layout): Promise<void> => writeLayout(layout))
+
+  ipcMain.handle(
+    'trace:exportCsv',
+    async (
+      evt,
+      args: { keys: string[]; xStart: number | null; xEnd: number | null }
+    ): Promise<{ ok: true; path: string } | { ok: false; error: string }> => {
+      try {
+        if (!currentSeries) return { ok: false, error: 'No trace loaded.' }
+        const series = args.keys
+          .map((k) => [k, currentSeries!.get(k)] as const)
+          .filter((e): e is [string, SignalSeries] => e[1] !== undefined)
+        if (series.length === 0) return { ok: false, error: 'No signals selected.' }
+
+        const win = BrowserWindow.fromWebContents(evt.sender)
+        const save = win
+          ? await dialog.showSaveDialog(win, {
+              defaultPath: 'trace.csv',
+              filters: [{ name: 'CSV', extensions: ['csv'] }]
+            })
+          : await dialog.showSaveDialog({
+              defaultPath: 'trace.csv',
+              filters: [{ name: 'CSV', extensions: ['csv'] }]
+            })
+        if (save.canceled || !save.filePath) return { ok: true, path: '' }
+
+        const xStart = args.xStart ?? -Infinity
+        const xEnd = args.xEnd ?? Infinity
+        const tsSet = new Set<number>()
+        for (const [, s] of series) {
+          for (let i = 0; i < s.timestamps.length; i++) {
+            const t = s.timestamps[i]
+            if (t >= xStart && t <= xEnd) tsSet.add(t)
+            if (tsSet.size > 1_000_000) break
+          }
+          if (tsSet.size > 1_000_000) break
+        }
+        if (tsSet.size > 1_000_000) {
+          return {
+            ok: false,
+            error: 'Export would exceed 1,000,000 rows. Zoom in and retry.'
+          }
+        }
+        const xs = Array.from(tsSet).sort((a, b) => a - b)
+
+        const cursors = series.map(([, s]) => ({ s, i: 0, last: NaN }))
+        const esc = (v: string): string =>
+          /[,"\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v
+        const header = ['timestamp', ...series.map(([, s]) => labelFor(s))]
+          .map(esc)
+          .join(',')
+        const lines = [header]
+        for (const t of xs) {
+          const row: string[] = [t.toFixed(6)]
+          for (const c of cursors) {
+            while (c.i < c.s.timestamps.length && c.s.timestamps[c.i] <= t) {
+              c.last = c.s.values[c.i]
+              c.i++
+            }
+            if (Number.isNaN(c.last)) row.push('')
+            else if (c.s.enum) row.push(c.s.enum[Math.round(c.last)] ?? String(c.last))
+            else row.push(String(c.last))
+          }
+          lines.push(row.map(esc).join(','))
+        }
+        await writeFile(save.filePath, lines.join('\n'), 'utf8')
+        return { ok: true, path: save.filePath }
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : String(err) }
+      }
+    }
+  )
 
   createWindow()
   app.on('activate', () => {
