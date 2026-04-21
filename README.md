@@ -13,6 +13,10 @@ Electron + React + TypeScript app for loading a DBC + PEAK TRC or MDF 4.x bus-lo
 - A/B measurement cursors with per-trace readouts and Δ, shared across panes
 - Value-table enum labels in hover tooltips and cursor readouts
 - Layout persistence — last DBC, trace, pane config, filter, open groups, and cursors restored on launch
+- Trace parse + decode run in a Node worker — the UI stays responsive during large loads
+- Draggable cursors with snap-to-sample and arrow-key nudging (Shift = 10×)
+- Min/max/mean statistics between A and B in the cursor readout
+- CSV export (wide format, current x-range) and PNG export (1920×1080) per pane
 
 ## Stack
 
@@ -44,7 +48,9 @@ npm run build:linux
 ## Layout
 
 - `src/main/` — Node side
-  - `index.ts` — Electron bootstrap, IPC handlers, progress emitter
+  - `index.ts` — Electron bootstrap, IPC handlers, progress emitter, CSV/PNG export
+  - `decode.worker.ts` — `worker_threads` entry that runs parse + decode off the main thread
+  - `workerHost.ts` — main-side wrapper that spawns one worker per trace load
   - `dbc.ts` — DBC loader; builds `idToMessage` / `pgnToMessage` lookups; J1939 helpers
   - `trc.ts` — TRC v2.1 parser (requires `$COLUMNS` header; chunked with progress)
   - `mf4.ts` — MDF 4.x bus-event parser (classic CAN, CANedge + Rexgen)
@@ -65,6 +71,8 @@ npm run build:linux
 - `trace:getSignal` — single signal payload (timestamps + values)
 - `trace:progress` — main → renderer: `{stage, current, total}`
 - `layout:read`, `layout:write` — workspace persistence
+- `trace:exportCsv` — wide-format CSV for the active pane, capped at 1M rows
+- `trace:exportPng` — writes a PNG byte buffer from `Plotly.toImage` to a user-chosen path
 
 ## Notes
 
@@ -73,7 +81,9 @@ npm run build:linux
 - Renderer-side payload cache avoids re-fetching when switching panes.
 - Dense traces are downsampled in the renderer via LTTB with a 2000-point budget per trace, re-computed on zoom.
 - Layout is persisted to `layout.json` in Electron's `userData` directory. Delete it to reset.
+- Trace parse + decode run in a Node worker; progress events flow through `trace:progress` unchanged. The worker re-parses the DBC from its path rather than receiving serialized candied objects.
+- CSV export uses wide format — one row per unique timestamp across the pane's signals, columns per signal. Enum signals write labels when available; unresolved labels fall back to the raw value.
 
 ## Non-goals (deferred)
 
-Worker threads, CAN-FD, MF4 `##HL`/`##DL` chained data blocks, MF4 `dz_zip_type=1` (transposed deflate).
+MF4 `##HL`/`##DL` chained data blocks, MF4 `dz_zip_type=1` (transposed deflate), cancellation of in-flight loads, multi-pane export, `.xlsx` / JSON export, time-weighted statistics.

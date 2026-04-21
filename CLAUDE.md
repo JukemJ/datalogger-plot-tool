@@ -10,7 +10,9 @@ Electron + React + TypeScript app for loading a DBC + TRC/MF4 and plotting decod
 
 ## Layout
 - `src/main/` — Node side
-  - `index.ts` — Electron bootstrap, IPC handlers, progress emitter
+  - `index.ts` — Electron bootstrap, IPC handlers, progress emitter, CSV/PNG export handlers
+  - `decode.worker.ts` — worker_threads entry: parses + decodes off the main thread, posts progress, transfers `Float64Array`s back
+  - `workerHost.ts` — main-side wrapper that spawns one worker per load, forwards progress, terminates on done/error
   - `dbc.ts` — loads .dbc (via candied) or .dbc-json; builds `idToMessage` and `pgnToMessage` lookup tables; `pgnOf` / `saOf` helpers; `isJ1939Message` via `VFrameFormat=J1939PG` attribute with fallback to 29-bit + non-zero PGN
   - `trc.ts` — TRC v2.1 parser. Reads `$COLUMNS` header (required) to locate fields. Chunked parsing (10k lines) with `setImmediate` yields + `onProgress` callback
   - `mf4.ts` — MDF 4.x bus-event parser (classic CAN, CANedge + Rexgen). Emits `Frame[]` into the same decode pipeline
@@ -20,8 +22,8 @@ Electron + React + TypeScript app for loading a DBC + TRC/MF4 and plotting decod
   - `store.ts` — atomic read/write of `layout.json` in Electron's `userData` directory; returns `null` on missing/corrupt/version-mismatch
   - `decode.test.ts` — 6 hand-computed Intel/Motorola/signed/factor+offset cases. Run via `npm test` (uses Node's `--experimental-strip-types`)
   - `mf4.test.ts` — block header, zlib inflate, record iterator, end-to-end smoke on `running.mf4`
-- `src/preload/index.ts` — `window.api` bridge: `loadDbc`, `loadTrace`, `pickDbc`, `pickTrace`, `getSignal`, `readLayout`, `writeLayout`, `getPathForFile`, `onTraceProgress`
-- `src/renderer/src/lttb.ts` — pure LTTB decimation + `sampleAt` interpolator (used by cursor readouts)
+- `src/preload/index.ts` — `window.api` bridge: `loadDbc`, `loadTrace`, `pickDbc`, `pickTrace`, `getSignal`, `readLayout`, `writeLayout`, `exportCsv`, `exportPng`, `getPathForFile`, `onTraceProgress`
+- `src/renderer/src/lttb.ts` — pure LTTB decimation, `sampleAt` interpolator, `snapTimestamp` / `stepSample` for cursor alignment, `statsInRange` for min/max/mean readout
 - `src/renderer/src/App.tsx` — single-file React app
   - Empty state: large drop zones centered
   - Loaded state: slim top navbar + 360px picker sidebar + pane stack
@@ -37,6 +39,8 @@ Electron + React + TypeScript app for loading a DBC + TRC/MF4 and plotting decod
 - `trace:getSignal` — returns a single `SignalPayload` (timestamps + values + enum)
 - `trace:progress` — main → renderer event: `{stage: 'reading'|'parsing'|'decoding'|'indexing', current, total}`
 - `layout:read`, `layout:write` — workspace JSON persistence
+- `trace:exportCsv` — wide-format CSV of the active pane over the current x-range; 1M-row cap
+- `trace:exportPng` — writes a PNG byte buffer (produced by `Plotly.toImage` in the renderer) to a user-chosen path
 
 ## Conventions used in this codebase
 - No unnecessary comments, no speculative abstractions
@@ -47,6 +51,8 @@ Electron + React + TypeScript app for loading a DBC + TRC/MF4 and plotting decod
 - Never mock the decoder in tests — `bits.ts` stays pure and is tested directly
 - Decimation happens renderer-side at draw time against the current x-range; the main-process payload is always full-resolution. Don't decimate upstream.
 - Layout JSON is a best-effort restore: missing files surface as errors, stale trace keys render as empty legends, schema-version mismatch falls back to a fresh layout. No migrations — bump `version` and let it reset.
+- Trace parse + decode run in a `worker_threads` worker. The worker re-parses the DBC from `dbcPath` on each load rather than receiving serialized candied objects (avoids structured-clone issues with class instances). Decoded `Float64Array`s are transferred back, not copied.
+- Cursors support drag via Plotly's `edits.shapePosition`; position changes surface through `plotly_relayout` as `shapes[N].x0`. Snap-to-sample is on by default; toggle in the toolbar persists to `layout.json` as the additive `cursors.snap` field (schema stays at `version: 1`).
 
 ## Phase history
 - **Phase 1** — drop-zone shell, DBC parsing only
@@ -55,15 +61,16 @@ Electron + React + TypeScript app for loading a DBC + TRC/MF4 and plotting decod
 - **Phase 4** — stacked panes with synced x-axis, dual Y, collapsible nav + progress modal, chunked parse/decode
 - **Phase 5a** — MF4 (MDF 4.x) bus-log support via `src/main/mf4.ts`; unified behind `trace:*` IPC
 - **Phase 5b** — renderer-side LTTB decimation (2000-point budget, x-range aware), shared A/B measurement cursors with interpolated readout, value-table enum display in hover tooltip + cursor readout (`enum` field piped through `SignalSeries` / `SignalPayload`)
-- **Phase 5c** (current) — layout persistence (DBC + trace paths, panes, filter, open groups, cursors) via `src/main/store.ts` and `layout:*` IPC; docs sync
+- **Phase 5c** — layout persistence (DBC + trace paths, panes, filter, open groups, cursors) via `src/main/store.ts` and `layout:*` IPC; docs sync
+- **Phase 6** (current) — decode moved to a `worker_threads` worker; draggable cursors with snap-to-sample + keyboard nudge; min/max/mean stats between cursors; CSV and PNG export
 
 ## Display names
 - Long-symbol resolution lives in `src/main/dbc.ts` (`longMessageName` / `longSignalName`). `BA_ "SystemMessageLongSymbol"` and `BA_ "SystemSignalLongSymbol"` override the truncated `BO_` / `SG_` symbols when present. Short symbol stays as the fallback. Lookups (`idToMessage`, `pgnToMessage`, candied's internal signal map) always key off the raw short symbol — display names are cosmetic only, applied once at catalog + decode time.
 
 ## Non-goals (deliberately deferred)
-- Worker threads
-- CAN-FD
 - MF4 `##HL` / `##DL` chained data blocks, `dz_zip_type=1` transposed deflate
-- Snap-to-sample / draggable cursors, keyboard nudging
+- Cancellation of in-flight loads; multiple concurrent workers / worker pool
+- Multi-pane export; `.xlsx` / JSON export; copy-to-clipboard as image
+- Time-weighted statistics, std-dev, in-readout histograms
 - Enum-aware y-axis tick labels (mixed enum + continuous panes make this awkward)
 - Multiple saved workspaces / export-import layout / cross-machine sync
