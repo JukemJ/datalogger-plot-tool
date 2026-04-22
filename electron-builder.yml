@@ -1,5 +1,5 @@
-appId: com.electron.app
-productName: app
+appId: dev.dixn.can-viewer
+productName: CAN-log-viewer
 directories:
   buildResources: build
 files:
@@ -12,7 +12,7 @@ files:
 asarUnpack:
   - resources/**
 win:
-  executableName: app
+  executableName: CAN-viewer
 nsis:
   artifactName: ${name}-${version}-setup.${ext}
   shortcutName: ${productName}
