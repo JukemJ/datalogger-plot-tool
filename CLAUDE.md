@@ -74,3 +74,4 @@ Electron + React + TypeScript app for loading a DBC + TRC/MF4 and plotting decod
 - Time-weighted statistics, std-dev, in-readout histograms
 - Enum-aware y-axis tick labels (mixed enum + continuous panes make this awkward)
 - Multiple saved workspaces / export-import layout / cross-machine sync
+- Streaming frame pipeline: parsers (`trc.ts`, `mf4.ts`) emit chunks via callback instead of returning `Frame[]`; decoder accumulates into typed arrays incrementally so only one chunk is in memory at a time. Would cut peak RAM ~60–70% on large files. Requires coordinated changes to `trc.ts`, `mf4.ts`, `decode.ts`, and `decode.worker.ts`.

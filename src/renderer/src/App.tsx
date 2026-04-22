@@ -26,6 +26,16 @@ type SignalPayload = {
 const LTTB_THRESHOLD = 2000
 type ProgressStage = 'reading' | 'parsing' | 'decoding' | 'indexing'
 type TraceProgress = { stage: ProgressStage; current: number; total: number }
+type StageProgressMap = Record<ProgressStage, TraceProgress>
+
+function makeInitialStageProgress(): StageProgressMap {
+  return {
+    reading: { stage: 'reading', current: 0, total: 1 },
+    parsing: { stage: 'parsing', current: 0, total: 1 },
+    decoding: { stage: 'decoding', current: 0, total: 1 },
+    indexing: { stage: 'indexing', current: 0, total: 1 }
+  }
+}
 
 type DbcLoaded = { path: string; summary: DbcSummary; decodable: boolean }
 type TraceLoaded = {
@@ -84,8 +94,17 @@ function App(): React.JSX.Element {
   const [filter, setFilter] = useState('')
   const [openGroups, setOpenGroups] = useState<Set<string>>(new Set())
   const [progress, setProgress] = useState<TraceProgress | null>(null)
+  const [stageProgress, setStageProgress] = useState<StageProgressMap>(makeInitialStageProgress)
   const [showDbcPicker, setShowDbcPicker] = useState(false)
   const [showTracePicker, setShowTracePicker] = useState(false)
+  const traceLoadingRef = useRef(false)
+  const lastProgressRef = useRef<StageProgressMap>(makeInitialStageProgress())
+
+  const resetStageProgress = useCallback(() => {
+    const next = makeInitialStageProgress()
+    lastProgressRef.current = next
+    setStageProgress(next)
+  }, [])
 
   const [panes, setPanes] = useState<Pane[]>(() => [
     { id: nextPaneId(), title: 'Plot 1', traces: [] }
@@ -93,7 +112,7 @@ function App(): React.JSX.Element {
   const [activePaneId, setActivePaneId] = useState<string>(() => panes[0].id)
 
   const [xRange, setXRange] = useState<[number, number] | null>(null)
-  const xRangeSource = useRef<string | null>(null)
+  const [xRangeSource, setXRangeSource] = useState<string | null>(null)
 
   const [cursorA, setCursorA] = useState<number | null>(null)
   const [cursorB, setCursorB] = useState<number | null>(null)
@@ -185,7 +204,18 @@ function App(): React.JSX.Element {
   }, [])
 
   useEffect(() => {
-    const unsub = window.api.onTraceProgress((p) => setProgress(p))
+    const unsub = window.api.onTraceProgress((p) => {
+      if (!traceLoadingRef.current) return
+      const lastMap = lastProgressRef.current
+      const last = lastMap[p.stage]
+      const current = Math.max(last.current, p.current)
+      const total = Math.max(last.total, p.total)
+      const nextStage = current === p.current && total === p.total ? p : { ...p, current, total }
+      const nextMap: StageProgressMap = { ...lastMap, [p.stage]: nextStage }
+      lastProgressRef.current = nextMap
+      setStageProgress(nextMap)
+      setProgress(nextStage)
+    })
     return unsub
   }, [])
 
@@ -204,17 +234,26 @@ function App(): React.JSX.Element {
           }
           setDbc({ path: saved.dbcPath, summary: result.summary, decodable: result.decodable })
           if (saved.tracePath) {
-            const tr = await window.api.loadTrace(saved.tracePath)
-            if (tr.ok) {
-              setTrace({
-                path: saved.tracePath,
-                frameCount: tr.frameCount,
-                skipped: tr.skipped,
-                warnings: tr.warnings
-              })
-              setSignals(tr.signals)
-            } else {
-              setTraceError(`Could not restore last trace: ${saved.tracePath}`)
+            traceLoadingRef.current = true
+            resetStageProgress()
+            setProgress({ stage: 'reading', current: 0, total: 1 })
+            try {
+              const tr = await window.api.loadTrace(saved.tracePath)
+              if (tr.ok) {
+                setTrace({
+                  path: saved.tracePath,
+                  frameCount: tr.frameCount,
+                  skipped: tr.skipped,
+                  warnings: tr.warnings
+                })
+                setSignals(tr.signals)
+              } else {
+                setTraceError(`Could not restore last trace: ${saved.tracePath}`)
+              }
+            } finally {
+              traceLoadingRef.current = false
+              resetStageProgress()
+              setProgress(null)
             }
           }
         }
@@ -250,7 +289,18 @@ function App(): React.JSX.Element {
       })
     }, 400)
     return () => clearTimeout(handle)
-  }, [dbc, trace, panes, activePaneId, filter, openGroups, cursorA, cursorB, cursorMode, cursorSnap])
+  }, [
+    dbc,
+    trace,
+    panes,
+    activePaneId,
+    filter,
+    openGroups,
+    cursorA,
+    cursorB,
+    cursorMode,
+    cursorSnap
+  ])
 
   const loadDbcPath = useCallback(async (filePath: string) => {
     setDbcError(null)
@@ -272,23 +322,30 @@ function App(): React.JSX.Element {
   const loadTracePath = useCallback(async (filePath: string) => {
     setTraceError(null)
     setShowTracePicker(false)
+    traceLoadingRef.current = true
+    resetStageProgress()
     setProgress({ stage: 'reading', current: 0, total: 1 })
-    const result = await window.api.loadTrace(filePath)
-    setProgress(null)
-    if (result.ok) {
-      setTrace({
-        path: filePath,
-        frameCount: result.frameCount,
-        skipped: result.skipped,
-        warnings: result.warnings
-      })
-      setSignals(result.signals)
-      payloadCache.clear()
-      setPanes((prev) => prev.map((p) => ({ ...p, traces: [] })))
-    } else {
-      setTraceError(result.error)
+    try {
+      const result = await window.api.loadTrace(filePath)
+      if (result.ok) {
+        setTrace({
+          path: filePath,
+          frameCount: result.frameCount,
+          skipped: result.skipped,
+          warnings: result.warnings
+        })
+        setSignals(result.signals)
+        payloadCache.clear()
+        setPanes((prev) => prev.map((p) => ({ ...p, traces: [] })))
+      } else {
+        setTraceError(result.error)
+      }
+    } finally {
+      traceLoadingRef.current = false
+      resetStageProgress()
+      setProgress(null)
     }
-  }, [])
+  }, [resetStageProgress])
 
   const filtered = useMemo(() => {
     if (!filter) return signals
@@ -328,7 +385,9 @@ function App(): React.JSX.Element {
           const exists = p.traces.some((t) => t.key === key)
           return {
             ...p,
-            traces: exists ? p.traces.filter((t) => t.key !== key) : [...p.traces, { key, axis: 'left' }]
+            traces: exists
+              ? p.traces.filter((t) => t.key !== key)
+              : [...p.traces, { key, axis: 'left' }]
           }
         })
       )
@@ -402,12 +461,14 @@ function App(): React.JSX.Element {
 
   const removeTrace = useCallback((paneId: string, key: string) => {
     setPanes((prev) =>
-      prev.map((p) => (p.id !== paneId ? p : { ...p, traces: p.traces.filter((t) => t.key !== key) }))
+      prev.map((p) =>
+        p.id !== paneId ? p : { ...p, traces: p.traces.filter((t) => t.key !== key) }
+      )
     )
   }, [])
 
   const onPaneXZoom = useCallback((paneId: string, range: [number, number] | null) => {
-    xRangeSource.current = paneId
+    setXRangeSource(paneId)
     setXRange(range)
   }, [])
 
@@ -601,7 +662,7 @@ function App(): React.JSX.Element {
                 onFlipAxis={(k) => flipTraceAxis(pane.id, k)}
                 onRemoveTrace={(k) => removeTrace(pane.id, k)}
                 xRange={xRange}
-                xRangeSource={xRangeSource.current}
+                xRangeSource={xRangeSource}
                 onXZoom={(r) => onPaneXZoom(pane.id, r)}
                 cursorA={cursorA}
                 cursorB={cursorB}
@@ -616,11 +677,7 @@ function App(): React.JSX.Element {
 
       {showDbcPicker && fullyLoaded && (
         <Modal onClose={() => setShowDbcPicker(false)} title="Change DBC">
-          <FileZone
-            label="Drop a DBC (.dbc or .json)"
-            onFile={loadDbcPath}
-            onBrowse={pickDbc}
-          />
+          <FileZone label="Drop a DBC (.dbc or .json)" onFile={loadDbcPath} onBrowse={pickDbc} />
           {dbcError && <section className="status status--err">DBC error: {dbcError}</section>}
         </Modal>
       )}
@@ -638,7 +695,7 @@ function App(): React.JSX.Element {
         </Modal>
       )}
 
-      {progress && <ProgressOverlay progress={progress} />}
+      {progress && <ProgressOverlay stageProgress={stageProgress} />}
     </div>
   )
 }
@@ -703,16 +760,33 @@ function Modal({
   )
 }
 
-function ProgressOverlay({ progress }: { progress: TraceProgress }): React.JSX.Element {
-  const pct = progress.total > 0 ? Math.floor((progress.current / progress.total) * 100) : 0
+function ProgressOverlay({
+  stageProgress
+}: {
+  stageProgress: StageProgressMap
+}): React.JSX.Element {
+  const stages: ProgressStage[] = ['reading', 'parsing', 'decoding']
+  const labelFor = (s: ProgressStage): string => s.charAt(0).toUpperCase() + s.slice(1)
   return (
     <div className="progress-backdrop">
       <div className="progress">
-        <div className="progress__label">
-          {progress.stage.charAt(0).toUpperCase() + progress.stage.slice(1)}… {pct}%
-        </div>
-        <div className="progress__bar">
-          <div className="progress__fill" style={{ width: `${pct}%` }} />
+        <div className="progress__label">Loading trace…</div>
+        <div className="progress__rows">
+          {stages.map((s) => {
+            const p = stageProgress[s]
+            const pct = p.total > 0 ? Math.floor((p.current / p.total) * 100) : 0
+            return (
+              <div key={s} className="progress__row">
+                <div className="progress__row-label">
+                  <span>{labelFor(s)}</span>
+                  <span>{pct}%</span>
+                </div>
+                <div className="progress__bar">
+                  <div className="progress__fill" style={{ width: `${pct}%` }} />
+                </div>
+              </div>
+            )
+          })}
         </div>
       </div>
     </div>
@@ -987,10 +1061,8 @@ function PaneView({
           isEnum: false,
           stats: null as null | { min: string; max: string; mean: string; count: number }
         }
-      const a =
-        cursorA !== null ? sampleAt(p.timestamps, p.values, cursorA, !!p.enum) : null
-      const b =
-        cursorB !== null ? sampleAt(p.timestamps, p.values, cursorB, !!p.enum) : null
+      const a = cursorA !== null ? sampleAt(p.timestamps, p.values, cursorA, !!p.enum) : null
+      const b = cursorB !== null ? sampleAt(p.timestamps, p.values, cursorB, !!p.enum) : null
       const delta = a !== null && b !== null ? b - a : null
       let stats: { min: string; max: string; mean: string; count: number } | null = null
       if (cursorA !== null && cursorB !== null) {

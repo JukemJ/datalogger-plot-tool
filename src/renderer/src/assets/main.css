@@ -435,6 +435,25 @@ body {
   color: #ccc;
 }
 
+.progress__rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.progress__row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.progress__row-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #c9c9c9;
+}
+
 .progress__bar {
   height: 10px;
   background: #2a2d31;

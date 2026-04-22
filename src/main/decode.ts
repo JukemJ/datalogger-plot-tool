@@ -68,7 +68,6 @@ export async function decodeFrames(
   onProgress?: ProgressCb
 ): Promise<Map<string, SignalSeries>> {
   const total = frames.length
-  const counts = new Map<string, number>()
   const sigNameCache = new WeakMap<Signal, string>()
   const msgNameCache = new WeakMap<Message, string>()
   const resolveSigName = (sig: Signal): string => {
@@ -85,16 +84,18 @@ export async function decodeFrames(
     msgNameCache.set(msg, n)
     return n
   }
-  const meta = new Map<
-    string,
-    {
-      signalName: string
-      messageName: string
-      sa: number | null
-      unit: string
-      enum: Record<number, string> | null
-    }
-  >()
+
+  type Accumulator = {
+    signalName: string
+    messageName: string
+    sa: number | null
+    unit: string
+    enum: Record<number, string> | null
+    timestamps: number[]
+    values: number[]
+  }
+  const accum = new Map<string, Accumulator>()
+
   for (let i = 0; i < frames.length; i++) {
     const f = frames[i]
     const r = resolveMessage(f, idToMessage, pgnToMessage)
@@ -102,9 +103,9 @@ export async function decodeFrames(
       for (const [, sig] of r.message.signals) {
         const signalName = resolveSigName(sig)
         const key = seriesKey(signalName, r.sa)
-        counts.set(key, (counts.get(key) ?? 0) + 1)
-        if (!meta.has(key))
-          meta.set(key, {
+        let a = accum.get(key)
+        if (!a) {
+          a = {
             signalName,
             messageName: resolveMsgName(r.message),
             sa: r.sa,
@@ -112,45 +113,15 @@ export async function decodeFrames(
             enum:
               sig.valueTable && sig.valueTable.size > 0
                 ? Object.fromEntries(sig.valueTable)
-                : null
-          })
-      }
-    }
-    if ((i & (DECODE_CHUNK - 1)) === DECODE_CHUNK - 1) {
-      onProgress?.({ stage: 'indexing', current: i + 1, total })
-      await yieldControl()
-    }
-  }
-  onProgress?.({ stage: 'indexing', current: total, total })
-
-  const store = new Map<string, SignalSeries>()
-  const writeIdx = new Map<string, number>()
-  for (const [key, n] of counts) {
-    const m = meta.get(key)!
-    store.set(key, {
-      signalName: m.signalName,
-      messageName: m.messageName,
-      sa: m.sa,
-      unit: m.unit,
-      enum: m.enum,
-      timestamps: new Float64Array(n),
-      values: new Float64Array(n)
-    })
-    writeIdx.set(key, 0)
-  }
-
-  for (let i = 0; i < frames.length; i++) {
-    const f = frames[i]
-    const r = resolveMessage(f, idToMessage, pgnToMessage)
-    if (r) {
-      for (const [, sig] of r.message.signals) {
-        const key = seriesKey(resolveSigName(sig), r.sa)
-        const series = store.get(key)!
-        const idx = writeIdx.get(key)!
+                : null,
+            timestamps: [],
+            values: []
+          }
+          accum.set(key, a)
+        }
         const raw = extractBits(f.data, sig.startBit, sig.length, sig.endian, sig.signed)
-        series.timestamps[idx] = f.timestamp
-        series.values[idx] = raw * sig.factor + sig.offset
-        writeIdx.set(key, idx + 1)
+        a.timestamps.push(f.timestamp)
+        a.values.push(raw * sig.factor + sig.offset)
       }
     }
     if ((i & (DECODE_CHUNK - 1)) === DECODE_CHUNK - 1) {
@@ -159,5 +130,18 @@ export async function decodeFrames(
     }
   }
   onProgress?.({ stage: 'decoding', current: total, total })
+
+  const store = new Map<string, SignalSeries>()
+  for (const [key, a] of accum) {
+    store.set(key, {
+      signalName: a.signalName,
+      messageName: a.messageName,
+      sa: a.sa,
+      unit: a.unit,
+      enum: a.enum,
+      timestamps: new Float64Array(a.timestamps),
+      values: new Float64Array(a.values)
+    })
+  }
   return store
 }
